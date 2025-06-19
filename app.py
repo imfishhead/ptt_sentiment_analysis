@@ -139,16 +139,27 @@ def save_board_to_sqlite(board, df, db_path='ptt_cache.db'):
     conn.close()
 
 def load_board_from_sqlite(board, db_path='ptt_cache.db'):
-    conn = sqlite3.connect(db_path)
+    conn = None
     try:
+        conn = sqlite3.connect(db_path)
+        # 檢查表格是否存在
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='ptt_{board}'")
+        if cursor.fetchone() is None:
+            # 表格不存在，回傳空 DataFrame
+            return pd.DataFrame()
+        
         # 只載入近七天
         seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
         query = f"SELECT * FROM ptt_{board} WHERE timestamp >= '{seven_days_ago}'"
         df = pd.read_sql(query, conn, parse_dates=['timestamp'])
-    except Exception:
-        df = pd.DataFrame()
-    conn.close()
-    return df
+        return df
+    except Exception as e:
+        # 任何錯誤都回傳空 DataFrame
+        return pd.DataFrame()
+    finally:
+        if conn:
+            conn.close()
 
 # --- 側邊欄控制項 ---
 with st.sidebar:
@@ -164,10 +175,10 @@ with st.sidebar:
     # 啟動時自動從 SQLite 載入 cache
     if 'articles_df_dict' not in st.session_state:
         st.session_state['articles_df_dict'] = {}
-        for board in board_options:
-            st.session_state['articles_df_dict'][board] = load_board_from_sqlite(board)
     if 'hourly_data_dict' not in st.session_state:
         st.session_state['hourly_data_dict'] = {}
+    
+    # 移除自動載入，只在按下按鈕時才載入資料
 
     # 依據目前 dropdown 選擇顯示 cache 數量
     cache_count = 0
@@ -191,6 +202,10 @@ with st.sidebar:
 if st.session_state.get('trigger_fetch', False):
     # 不要清空 cache，保留用於增量抓取
     st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
+
+    # 載入現有資料（如果存在）
+    if selected_board not in st.session_state['articles_df_dict']:
+        st.session_state['articles_df_dict'][selected_board] = load_board_from_sqlite(selected_board)
 
     sentiment_model_placeholder = get_sentiment_model()
 
@@ -221,7 +236,7 @@ elif (
     and ('articles_df_dict' not in st.session_state or selected_board not in st.session_state['articles_df_dict'] or st.session_state['articles_df_dict'][selected_board].empty)
     and not st.session_state.get('trigger_fetch', False)
 ):
-    st.info("👋 歡迎使用！請從左側選擇看板，然後點擊「抓取並分析最新文章」按鈕開始。")
+    st.info("歡迎使用！請從左側選擇看板，然後點擊「抓取並分析最新文章」按鈕開始。")
 
 # --- 顯示結果 (當數據存在時) ---
 
