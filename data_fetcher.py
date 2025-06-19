@@ -84,6 +84,9 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                         continue
             else:
                 continue
+            if post_time.date() < start:
+                stop_crawling = True
+                break
             if not (start <= post_time.date() <= today):
                 continue
             if last_time is not None and post_time <= pd.to_datetime(last_time):
@@ -126,8 +129,8 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
         else:
             break
     # 合併 cache
-    if 'articles_df' in st.session_state and not st.session_state['articles_df'].empty:
-        old_df = st.session_state['articles_df']
+    if 'articles_df_dict' in st.session_state and board in st.session_state['articles_df_dict'] and not st.session_state['articles_df_dict'][board].empty:
+        old_df = st.session_state['articles_df_dict'][board]
         new_df = pd.DataFrame(articles)
         all_df = pd.concat([old_df, new_df], ignore_index=True)
         all_df = all_df.drop_duplicates(subset=['timestamp', 'title', 'author'], keep='last')
