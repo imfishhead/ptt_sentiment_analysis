@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from snownlp import SnowNLP # 導入 SnowNLP
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm # 用於設置中文字體
-import seaborn as sns # 用於熱力圖
+# 移除 matplotlib 開頭匯入，改為延遲載入
+# import matplotlib.pyplot as plt
+# import matplotlib.font_manager as fm # 用於設置中文字體
+# import seaborn as sns # 用於熱力圖
 
 # --- 情感詞典和相關配置 ---
 emotion_lexicon = {
@@ -75,31 +76,6 @@ def split_paragraphs(text):
     """將文本分割成段落"""
     # 簡單地按換行符分割，可以根據需要調整
     return text.split('\n\n')
-
-def setup_chinese_display():
-    """設置 Matplotlib 中文字體顯示"""
-    font_paths = fm.findSystemFonts(fontpaths=None, fontext='ttf')
-    chinese_fonts = [f for f in font_paths if 'kai' in f.lower() or 'hei' in f.lower() or 'msyh' in f.lower()]
-    
-    if chinese_fonts:
-        for font_path in chinese_fonts:
-            if 'msyh' in font_path.lower():
-                plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
-                break
-            elif 'kai' in font_path.lower():
-                 plt.rcParams['font.sans-serif'] = ['KaiTi']
-                 break
-            elif 'hei' in font_path.lower():
-                 plt.rcParams['font.sans-serif'] = ['SimHei']
-                 break
-        else:
-            plt.rcParams['font.sans-serif'] = [fm.FontProperties(fname=chinese_fonts[0]).get_name()]
-        
-        plt.rcParams['axes.unicode_minus'] = False
-        return plt.rcParams['font.sans-serif'][0]
-    else:
-        st.warning("⚠️ 未找到系統中文字體，圖表中的中文可能無法正常顯示。請確保您的系統已安裝中文字體。")
-        return None
 
 # 調整 analyze_article_sentiment 使其適合 Streamlit 的情感分析流程
 def analyze_article_sentiment(text):
