@@ -11,9 +11,9 @@ import http.cookiejar
 # 這裡應該放置你的 PTT 爬蟲和資料庫讀取邏輯
 # 為了範例，我們將使用模擬數據
 
-def get_ptt_articles_from_db(board: str) -> pd.DataFrame:
+def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     """
-    直接在這裡實作 PTT 七天文章爬蟲，邊抓邊顯示進度。
+    只抓比 last_time 新的文章，並與 cache 合併去重。
     """
     st.write(f"🔎 正在爬取 PTT {board} 看板過去七天的文章...")
     base_url = "https://www.ptt.cc"
@@ -39,15 +39,16 @@ def get_ptt_articles_from_db(board: str) -> pd.DataFrame:
         'Accept-Language': 'zh-TW,zh;q=0.9',
         'Referer': 'https://www.ptt.cc/bbs/index.html'
     })
-    days_to_scrape = 1
+    days_to_scrape = 7
     today = datetime.date.today()
     start = today - datetime.timedelta(days=days_to_scrape-1)
-    max_pages = 5
+    max_pages = 200
     request_delay = 1.0
     page_delay = 0.5
     current_count = 0
     page = 1
-    while page <= max_pages:
+    stop_crawling = False
+    while page <= max_pages and not stop_crawling:
         res = session.get(url)
         if res.status_code != 200:
             break
@@ -85,6 +86,9 @@ def get_ptt_articles_from_db(board: str) -> pd.DataFrame:
                 continue
             if not (start <= post_time.date() <= today):
                 continue
+            if last_time is not None and post_time <= pd.to_datetime(last_time):
+                stop_crawling = True
+                break
             page_has_recent_articles = True
             # 內文
             main_content = art_soup.select_one('#main-content')
@@ -98,7 +102,6 @@ def get_ptt_articles_from_db(board: str) -> pd.DataFrame:
                 if signature_pos > 0:
                     content_text = content_text[:signature_pos].strip()
                 content = content_text
-
             articles.append({
                 'timestamp': post_time,
                 'content': content,
@@ -122,4 +125,12 @@ def get_ptt_articles_from_db(board: str) -> pd.DataFrame:
             time.sleep(page_delay)
         else:
             break
-    return pd.DataFrame(articles)
+    # 合併 cache
+    if 'articles_df' in st.session_state and not st.session_state['articles_df'].empty:
+        old_df = st.session_state['articles_df']
+        new_df = pd.DataFrame(articles)
+        all_df = pd.concat([old_df, new_df], ignore_index=True)
+        all_df = all_df.drop_duplicates(subset=['timestamp', 'title', 'author'], keep='last')
+        return all_df
+    else:
+        return pd.DataFrame(articles)

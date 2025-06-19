@@ -114,8 +114,13 @@ if st.session_state.get('trigger_fetch', False):
     # 載入情感分析模型 (現在它只是返回一個標誌)
     sentiment_model_placeholder = get_sentiment_model()
 
+    # 取得目前 cache 最新文章時間
+    last_time = None
+    if 'articles_df' in st.session_state and not st.session_state['articles_df'].empty:
+        last_time = st.session_state['articles_df']['timestamp'].max()
     articles_df = get_ptt_articles_from_db(
-        board=st.session_state['board_for_fetch']
+        board=st.session_state['board_for_fetch'],
+        last_time=last_time
     )
 
     if not articles_df.empty:
@@ -127,11 +132,9 @@ if st.session_state.get('trigger_fetch', False):
         # 直接顯示分析圖
         min_time = hourly_data.index.min().to_pydatetime()
         max_time = hourly_data.index.max().to_pydatetime()
-        st.subheader("🕰️ 情感趨勢時間軸")
-        if min_time == max_time:
-            selected_time = min_time
-            st.info(f"僅有一個時段：{min_time.strftime('%Y/%m/%d %H:00')}")
-        else:
+        st.subheader(f"[{selected_board}] 七天情感趨勢分析")
+        slider_needed = min_time != max_time
+        if slider_needed:
             selected_time = st.slider(
                 "選擇時間點以查看該小時的情感分佈",
                 min_value=min_time,
@@ -139,8 +142,12 @@ if st.session_state.get('trigger_fetch', False):
                 value=max_time,
                 step=datetime.timedelta(hours=1),
                 format="YYYY/MM/DD HH:00",
-                help="拖動滑桿以查看不同時間點的文章情感分佈。"
+                help="拖動滑桿以查看不同時間點的文章情感分佈。",
+                key="sentiment_time_slider"
             )
+        else:
+            selected_time = min_time
+            st.info(f"僅有一個時段：{min_time.strftime('%Y/%m/%d %H:00')}")
         time_diffs_td = hourly_data.index - selected_time
         time_diff_seconds = time_diffs_td.to_series().apply(lambda x: x.total_seconds()).abs()
         closest_time_index_loc = time_diff_seconds.argmin()
@@ -159,6 +166,7 @@ if st.session_state.get('trigger_fetch', False):
         )
         if st.button("顯示已抓取的原始文章資料"):
             st.dataframe(st.session_state['articles_df'], use_container_width=True, height=400)
+        st.info(f"目前已抓取並累積 {len(st.session_state['articles_df'])} 篇文章（含本次新抓取）")
     else:
         st.warning("⚠️ 沒有找到符合條件的文章，請嘗試其他看板或時間範圍。")
         st.session_state['hourly_data'] = pd.DataFrame()
@@ -180,11 +188,10 @@ if 'hourly_data' in st.session_state and not st.session_state['hourly_data'].emp
     min_time = hourly_data.index.min().to_pydatetime()
     max_time = hourly_data.index.max().to_pydatetime()
 
+    st.subheader(f"[{selected_board}] 七天情感趨勢分析")
     st.subheader("🕰️ 情感趨勢時間軸")
-    if min_time == max_time:
-        selected_time = min_time
-        st.info(f"僅有一個時段：{min_time.strftime('%Y/%m/%d %H:00')}")
-    else:
+    slider_needed = min_time != max_time
+    if slider_needed:
         selected_time = st.slider(
             "選擇時間點以查看該小時的情感分佈",
             min_value=min_time,
@@ -192,8 +199,12 @@ if 'hourly_data' in st.session_state and not st.session_state['hourly_data'].emp
             value=max_time,
             step=datetime.timedelta(hours=1),
             format="YYYY/MM/DD HH:00",
-            help="拖動滑桿以查看不同時間點的文章情感分佈。"
+            help="拖動滑桿以查看不同時間點的文章情感分佈。",
+            key="sentiment_time_slider"
         )
+    else:
+        selected_time = min_time
+        st.info(f"僅有一個時段：{min_time.strftime('%Y/%m/%d %H:00')}")
 
     # 找到最接近 slider 選定時間的數據點
     time_diffs_td = hourly_data.index - selected_time
@@ -219,6 +230,7 @@ if 'hourly_data' in st.session_state and not st.session_state['hourly_data'].emp
     # 新增：顯示原始文章資料按鈕
     if st.button("顯示已抓取的原始文章資料"):
         st.dataframe(st.session_state['articles_df'], use_container_width=True, height=400)
+        st.info(f"目前已抓取並累積 {len(st.session_state['articles_df'])} 篇文章（含本次新抓取）")
 
 st.markdown("---")
 st.caption("數據來源：PTT。情感分析結果來自詞典與規則。")
