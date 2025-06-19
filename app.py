@@ -141,7 +141,10 @@ def save_board_to_sqlite(board, df, db_path='ptt_cache.db'):
 def load_board_from_sqlite(board, db_path='ptt_cache.db'):
     conn = sqlite3.connect(db_path)
     try:
-        df = pd.read_sql(f'SELECT * FROM ptt_{board}', conn, parse_dates=['timestamp'])
+        # 只載入近七天
+        seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+        query = f"SELECT * FROM ptt_{board} WHERE timestamp >= '{seven_days_ago}'"
+        df = pd.read_sql(query, conn, parse_dates=['timestamp'])
     except Exception:
         df = pd.DataFrame()
     conn.close()
