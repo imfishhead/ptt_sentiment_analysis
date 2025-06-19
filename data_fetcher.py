@@ -20,6 +20,9 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     url = f"https://www.ptt.cc/bbs/{board}/index.html"
     articles = []
     progress_msg = st.empty()
+    info_msg = st.empty()
+    warning_msg = st.empty()
+    error_msg = st.empty()
     session = requests.Session()
     cookies = http.cookiejar.CookieJar()
     cookie = http.cookiejar.Cookie(
@@ -35,9 +38,10 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     )
     cookies.set_cookie(cookie)
     session.headers.update({
-        'User-Agent': 'Mozilla/5.0',
-        'Accept-Language': 'zh-TW,zh;q=0.9',
-        'Referer': 'https://www.ptt.cc/bbs/index.html'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+        'Referer': 'https://www.ptt.cc/bbs/index.html',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
     })
     days_to_scrape = 7
     today = datetime.date.today()
@@ -48,15 +52,29 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     current_count = 0
     page = 1
     stop_crawling = False
+    
+    info_msg.info(f"開始爬取，目標日期範圍：{start} ~ {today}")
+    
     while page <= max_pages and not stop_crawling:
-        res = session.get(url)
-        if res.status_code != 200:
+        progress_msg.info(f"正在爬取第 {page} 頁...")
+        try:
+            res = session.get(url, timeout=10)
+            if res.status_code != 200:
+                error_msg.error(f"無法連接到 PTT，狀態碼：{res.status_code}")
+                break
+        except Exception as e:
+            error_msg.error(f"連線錯誤：{str(e)}")
             break
+            
         soup = BeautifulSoup(res.text, 'html.parser')
         article_items = soup.select('.r-ent')
         if not article_items:
+            warning_msg.warning(f"第 {page} 頁沒有找到文章列表")
             break
+            
+        info_msg.info(f"第 {page} 頁找到 {len(article_items)} 篇文章")
         page_has_recent_articles = False
+        
         for article in article_items:
             title_element = article.select_one('.title a')
             if not title_element:
@@ -66,11 +84,16 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                 continue
             article_url = base_url + title_element['href']
             author = article.select_one('.meta .author').text.strip() if article.select_one('.meta .author') else "未知"
+            
             # 進入內頁抓發文時間與內文
             time.sleep(request_delay)
-            art_res = session.get(article_url)
-            if art_res.status_code != 200:
+            try:
+                art_res = session.get(article_url, timeout=10)
+                if art_res.status_code != 200:
+                    continue
+            except:
                 continue
+                
             art_soup = BeautifulSoup(art_res.text, 'html.parser')
             meta_elements = art_soup.select('.article-meta-value')
             if len(meta_elements) >= 4:
@@ -81,17 +104,22 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                     try:
                         post_time = datetime.datetime.strptime(time_str, '%Y/%m/%d %H:%M:%S')
                     except:
+                        warning_msg.warning(f"無法解析時間格式：{time_str}")
                         continue
             else:
                 continue
+                
             if post_time.date() < start:
+                info_msg.info(f"遇到舊文章 {title}，時間：{post_time.date()}，停止爬取")
                 stop_crawling = True
                 break
             if not (start <= post_time.date() <= today):
                 continue
             if last_time is not None and post_time <= pd.to_datetime(last_time):
+                info_msg.info(f"遇到已存在的文章 {title}，時間：{post_time}，停止爬取")
                 stop_crawling = True
                 break
+                
             page_has_recent_articles = True
             # 內文
             main_content = art_soup.select_one('#main-content')
@@ -113,8 +141,10 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                 'board': board
             })
             current_count += 1
-            progress_msg.info(f"爬取 {current_count} 篇…")
+            progress_msg.info(f"爬取 {current_count} 篇：{title}")
+            
         if not page_has_recent_articles and current_count > 0:
+            info_msg.info("本頁沒有符合條件的文章，停止爬取")
             break
         # 翻頁
         prev_page = None
@@ -127,7 +157,20 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
             page += 1
             time.sleep(page_delay)
         else:
+            info_msg.info("沒有更多頁面")
             break
+    
+    # 清除所有進度訊息，只顯示最終結果
+    progress_msg.empty()
+    info_msg.empty()
+    warning_msg.empty()
+    error_msg.empty()
+    
+    if len(articles) > 0:
+        st.success(f"✅ 爬取完成！共找到 {len(articles)} 篇符合條件的文章")
+    else:
+        st.warning("⚠️ 沒有找到符合條件的文章")
+    
     # 合併 cache
     if 'articles_df_dict' in st.session_state and board in st.session_state['articles_df_dict'] and not st.session_state['articles_df_dict'][board].empty:
         old_df = st.session_state['articles_df_dict'][board]
