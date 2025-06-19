@@ -23,7 +23,25 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     info_msg = st.empty()
     warning_msg = st.empty()
     error_msg = st.empty()
+    
+    # 更真實的瀏覽器標頭
     session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0'
+    })
+    
+    # 設定 cookies
     cookies = http.cookiejar.CookieJar()
     cookie = http.cookiejar.Cookie(
         version=0, name='over18', value='1',
@@ -37,18 +55,14 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
         rfc2109=False
     )
     cookies.set_cookie(cookie)
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
-        'Referer': 'https://www.ptt.cc/bbs/index.html',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-    })
+    session.cookies = cookies
+    
     days_to_scrape = 7
     today = datetime.date.today()
     start = today - datetime.timedelta(days=days_to_scrape-1)
     max_pages = 20
-    request_delay = 1.0
-    page_delay = 0.5
+    request_delay = 2.0  # 增加延遲時間
+    page_delay = 1.0     # 增加頁面間延遲
     current_count = 0
     page = 1
     stop_crawling = False
@@ -56,16 +70,49 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     info_msg.info(f"開始爬取，目標日期範圍：{start} ~ {today}")
     info_msg.info(f"目標 URL：{url}")
     
+    # 首先測試連線
+    try:
+        info_msg.info("測試 PTT 連線...")
+        test_res = session.get("https://www.ptt.cc/bbs/index.html", timeout=15)
+        info_msg.info(f"PTT 主頁連線測試：狀態碼 {test_res.status_code}")
+        if test_res.status_code != 200:
+            error_msg.error(f"PTT 主頁連線失敗，狀態碼：{test_res.status_code}")
+            return pd.DataFrame()
+    except Exception as e:
+        error_msg.error(f"PTT 主頁連線測試失敗：{str(e)}")
+        return pd.DataFrame()
+    
     while page <= max_pages and not stop_crawling:
         progress_msg.info(f"正在爬取第 {page} 頁...")
         try:
-            res = session.get(url, timeout=10)
+            info_msg.info(f"正在連接到：{url}")
+            res = session.get(url, timeout=15)  # 增加超時時間
             info_msg.info(f"第 {page} 頁連線狀態：{res.status_code}")
-            if res.status_code != 200:
+            
+            if res.status_code == 403:
+                error_msg.error("PTT 拒絕連線（403 Forbidden），可能是反爬蟲機制")
+                break
+            elif res.status_code == 404:
+                error_msg.error(f"看板 {board} 不存在（404 Not Found）")
+                break
+            elif res.status_code != 200:
                 error_msg.error(f"無法連接到 PTT，狀態碼：{res.status_code}")
                 break
+                
+        except requests.exceptions.Timeout:
+            error_msg.error(f"第 {page} 頁連線超時")
+            break
+        except requests.exceptions.ConnectionError:
+            error_msg.error(f"第 {page} 頁連線錯誤")
+            break
         except Exception as e:
-            error_msg.error(f"連線錯誤：{str(e)}")
+            error_msg.error(f"第 {page} 頁連線發生未知錯誤：{str(e)}")
+            break
+            
+        # 檢查回應內容
+        if len(res.text) < 1000:
+            error_msg.error(f"第 {page} 頁回應內容過短，可能被阻擋")
+            info_msg.info(f"回應內容長度：{len(res.text)} 字元")
             break
             
         soup = BeautifulSoup(res.text, 'html.parser')
@@ -80,12 +127,17 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                 info_msg.info(f"頁面標題：{page_title.text}")
             else:
                 info_msg.info("無法找到頁面標題")
+            
+            # 檢查是否有錯誤訊息
+            error_div = soup.find('div', class_='error')
+            if error_div:
+                info_msg.info(f"頁面錯誤訊息：{error_div.text}")
             break
             
         info_msg.info(f"第 {page} 頁找到 {len(article_items)} 篇文章（最多只爬 {max_pages} 頁）")
         page_has_recent_articles = False
         
-        for i, article in enumerate(article_items[:5]):  # 只處理前5篇文章作為測試
+        for i, article in enumerate(article_items[:3]):  # 只處理前3篇文章作為測試
             title_element = article.select_one('.title a')
             if not title_element:
                 info_msg.info(f"第 {i+1} 篇文章沒有標題連結")
@@ -102,7 +154,8 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
             # 進入內頁抓發文時間與內文
             time.sleep(request_delay)
             try:
-                art_res = session.get(article_url, timeout=10)
+                info_msg.info(f"正在連接到文章內頁：{article_url}")
+                art_res = session.get(article_url, timeout=15)
                 if art_res.status_code != 200:
                     info_msg.info(f"無法連接到文章內頁，狀態碼：{art_res.status_code}")
                     continue
