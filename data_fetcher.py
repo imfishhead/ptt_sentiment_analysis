@@ -46,7 +46,7 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     days_to_scrape = 7
     today = datetime.date.today()
     start = today - datetime.timedelta(days=days_to_scrape-1)
-    max_pages = 200
+    max_pages = 20
     request_delay = 1.0
     page_delay = 0.5
     current_count = 0
@@ -72,7 +72,7 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
             warning_msg.warning(f"第 {page} 頁沒有找到文章列表")
             break
             
-        info_msg.info(f"第 {page} 頁找到 {len(article_items)} 篇文章")
+        info_msg.info(f"第 {page} 頁找到 {len(article_items)} 篇文章（最多只爬 {max_pages} 頁）")
         page_has_recent_articles = False
         
         for article in article_items:
