@@ -54,11 +54,13 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     stop_crawling = False
     
     info_msg.info(f"開始爬取，目標日期範圍：{start} ~ {today}")
+    info_msg.info(f"目標 URL：{url}")
     
     while page <= max_pages and not stop_crawling:
         progress_msg.info(f"正在爬取第 {page} 頁...")
         try:
             res = session.get(url, timeout=10)
+            info_msg.info(f"第 {page} 頁連線狀態：{res.status_code}")
             if res.status_code != 200:
                 error_msg.error(f"無法連接到 PTT，狀態碼：{res.status_code}")
                 break
@@ -68,45 +70,65 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
             
         soup = BeautifulSoup(res.text, 'html.parser')
         article_items = soup.select('.r-ent')
+        info_msg.info(f"第 {page} 頁解析結果：找到 {len(article_items)} 個 .r-ent 元素")
+        
         if not article_items:
             warning_msg.warning(f"第 {page} 頁沒有找到文章列表")
+            # 檢查頁面內容，看是否有其他問題
+            page_title = soup.find('title')
+            if page_title:
+                info_msg.info(f"頁面標題：{page_title.text}")
+            else:
+                info_msg.info("無法找到頁面標題")
             break
             
         info_msg.info(f"第 {page} 頁找到 {len(article_items)} 篇文章（最多只爬 {max_pages} 頁）")
         page_has_recent_articles = False
         
-        for article in article_items:
+        for i, article in enumerate(article_items[:5]):  # 只處理前5篇文章作為測試
             title_element = article.select_one('.title a')
             if not title_element:
+                info_msg.info(f"第 {i+1} 篇文章沒有標題連結")
                 continue
             title = title_element.text.strip()
+            info_msg.info(f"第 {i+1} 篇文章標題：{title}")
             if '[公告]' in title:
+                info_msg.info(f"跳過公告文章：{title}")
                 continue
             article_url = base_url + title_element['href']
             author = article.select_one('.meta .author').text.strip() if article.select_one('.meta .author') else "未知"
+            info_msg.info(f"文章作者：{author}，URL：{article_url}")
             
             # 進入內頁抓發文時間與內文
             time.sleep(request_delay)
             try:
                 art_res = session.get(article_url, timeout=10)
                 if art_res.status_code != 200:
+                    info_msg.info(f"無法連接到文章內頁，狀態碼：{art_res.status_code}")
                     continue
-            except:
+            except Exception as e:
+                info_msg.info(f"連接到文章內頁時發生錯誤：{str(e)}")
                 continue
                 
             art_soup = BeautifulSoup(art_res.text, 'html.parser')
             meta_elements = art_soup.select('.article-meta-value')
+            info_msg.info(f"文章內頁找到 {len(meta_elements)} 個 meta 元素")
+            
             if len(meta_elements) >= 4:
                 time_str = meta_elements[3].text.strip()
+                info_msg.info(f"時間字串：{time_str}")
                 try:
                     post_time = datetime.datetime.strptime(time_str, '%a %b %d %H:%M:%S %Y')
+                    info_msg.info(f"解析時間成功：{post_time}")
                 except:
                     try:
                         post_time = datetime.datetime.strptime(time_str, '%Y/%m/%d %H:%M:%S')
+                        info_msg.info(f"解析時間成功（第二種格式）：{post_time}")
                     except:
                         warning_msg.warning(f"無法解析時間格式：{time_str}")
                         continue
             else:
+                info_msg.info("文章內頁沒有足夠的 meta 元素")
                 continue
                 
             if post_time.date() < start:
@@ -114,6 +136,7 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                 stop_crawling = True
                 break
             if not (start <= post_time.date() <= today):
+                info_msg.info(f"文章 {title} 不在目標日期範圍內：{post_time.date()}")
                 continue
             if last_time is not None and post_time <= pd.to_datetime(last_time):
                 info_msg.info(f"遇到已存在的文章 {title}，時間：{post_time}，停止爬取")
@@ -121,6 +144,8 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                 break
                 
             page_has_recent_articles = True
+            info_msg.info(f"文章 {title} 符合條件，開始抓取內文")
+            
             # 內文
             main_content = art_soup.select_one('#main-content')
             content = ""
@@ -133,6 +158,10 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
                 if signature_pos > 0:
                     content_text = content_text[:signature_pos].strip()
                 content = content_text
+                info_msg.info(f"內文長度：{len(content)} 字元")
+            else:
+                info_msg.info("無法找到文章內文")
+                
             articles.append({
                 'timestamp': post_time,
                 'content': content,
