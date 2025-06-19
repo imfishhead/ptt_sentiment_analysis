@@ -213,12 +213,19 @@ if st.session_state.get('trigger_fetch', False):
     last_time = None
     if selected_board in st.session_state['articles_df_dict'] and not st.session_state['articles_df_dict'][selected_board].empty:
         last_time = st.session_state['articles_df_dict'][selected_board]['timestamp'].max()
+        st.info(f"現有 cache 最新文章時間：{last_time}")
+    
+    st.info(f"開始呼叫爬蟲函數：get_ptt_articles_from_db({st.session_state['board_for_fetch']}, {last_time})")
+    
     articles_df = get_ptt_articles_from_db(
         board=st.session_state['board_for_fetch'],
         last_time=last_time
     )
+    
+    st.info(f"爬蟲函數執行完成，回傳 DataFrame 大小：{len(articles_df)} 行")
 
     if not articles_df.empty:
+        st.info("開始情感分析...")
         articles_df = analyze_sentiment_batch(articles_df, sentiment_model_placeholder)
         hourly_data = aggregate_emotions_by_hour(articles_df)
         st.session_state['hourly_data_dict'][selected_board] = hourly_data
