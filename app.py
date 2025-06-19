@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from data_fetcher import get_ptt_articles_from_db
 from sentiment_analyzer import get_sentiment_model, analyze_sentiment_batch # 導入你更新後的函數
 from config import EMOTIONS_NAMES
+import sqlite3
 
 # --- Streamlit 應用程式配置 ---
 st.set_page_config(
@@ -80,127 +81,11 @@ def plot_radar_chart(data_row: pd.Series, emotions: list) -> go.Figure:
     )
     return fig
 
-# 從 sentiment_analyzer 導入這些額外的映射，用於顯示
-from sentiment_analyzer import emotion_names_zh as EMOTION_NAMES_ZH
-from sentiment_analyzer import emotion_emojis as EMOTION_EMOJIS
-
-
-# --- 側邊欄控制項 ---
-with st.sidebar:
-    st.header("設定選項")
-    board_options = ['Gossiping', 'WomenTalk', 'Tech_Job', 'Boy-Girl', 'Stock', 'NBA']
-    selected_board = st.selectbox("選擇 PTT 看板", board_options, help="選擇你感興趣的 PTT 看板進行分析。")
-
-    today = datetime.date.today()
-    start_date = today - datetime.timedelta(days=6)
-    end_date = today
-    st.write(f"分析區間：{start_date} ~ {end_date}")
-
-    # 多看板獨立 cache：初始化 dict 結構
-    if 'articles_df_dict' not in st.session_state:
-        st.session_state['articles_df_dict'] = {}
-    if 'hourly_data_dict' not in st.session_state:
-        st.session_state['hourly_data_dict'] = {}
-
-    # 依據目前 dropdown 選擇顯示 cache 數量
-    cache_count = 0
-    latest_time_str = "無"
-    if selected_board in st.session_state['articles_df_dict'] and isinstance(st.session_state['articles_df_dict'][selected_board], pd.DataFrame):
-        cache_count = len(st.session_state['articles_df_dict'][selected_board])
-        if cache_count > 0:
-            latest_time = st.session_state['articles_df_dict'][selected_board]['timestamp'].max()
-            latest_time_str = latest_time.strftime('%Y/%m/%d %H:%M')
-    st.write(f"目前 Cache 已有 {cache_count} 篇文章，最新抓取時間：{latest_time_str}")
-
-    if st.button("🔄 抓取並分析最新文章", help=f"點擊以獲取 {selected_board} 看板過去七天的文章，並重新進行情感分析。", use_container_width=True):
-        st.session_state['trigger_fetch'] = True
-        st.session_state['board_for_fetch'] = selected_board
-        st.session_state['start_date'] = start_date
-        st.session_state['end_date'] = end_date
-        st.success("已排程數據抓取與分析！請稍候...")
-
-# --- 主內容區域 ---
-
-if st.session_state.get('trigger_fetch', False):
-    # 清空本次分析資料
-    st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
-    st.session_state['articles_df_dict'][selected_board] = pd.DataFrame()
-    st.info("抓取文章中，請稍後…")
-
-    sentiment_model_placeholder = get_sentiment_model()
-
-    # 取得目前 cache 最新文章時間
-    last_time = None
-    if selected_board in st.session_state['articles_df_dict'] and not st.session_state['articles_df_dict'][selected_board].empty:
-        last_time = st.session_state['articles_df_dict'][selected_board]['timestamp'].max()
-    articles_df = get_ptt_articles_from_db(
-        board=st.session_state['board_for_fetch'],
-        last_time=last_time
-    )
-
-    if not articles_df.empty:
-        articles_df = analyze_sentiment_batch(articles_df, sentiment_model_placeholder)
-        hourly_data = aggregate_emotions_by_hour(articles_df)
-        st.session_state['hourly_data_dict'][selected_board] = hourly_data
-        st.session_state['articles_df_dict'][selected_board] = articles_df
-        st.success("✅ 文章抓取與情感分析完成！")
-        min_time = hourly_data.index.min().to_pydatetime()
-        max_time = hourly_data.index.max().to_pydatetime()
-        st.subheader(f"[{selected_board}] 七天情感趨勢分析")
-        slider_needed = min_time != max_time
-        if slider_needed:
-            selected_time = st.slider(
-                "選擇時間點以查看該小時的情感分佈",
-                min_value=min_time,
-                max_value=max_time,
-                value=max_time,
-                step=datetime.timedelta(hours=1),
-                format="YYYY/MM/DD HH:00",
-                help="拖動滑桿以查看不同時間點的文章情感分佈。",
-                key="sentiment_time_slider"
-            )
-        else:
-            selected_time = min_time
-            st.info(f"僅有一個時段：{min_time.strftime('%Y/%m/%d %H:00')}")
-        time_diffs_td = hourly_data.index - selected_time
-        time_diff_seconds = time_diffs_td.to_series().apply(lambda x: x.total_seconds()).abs()
-        closest_time_index_loc = time_diff_seconds.argmin()
-        closest_time_data = hourly_data.iloc[closest_time_index_loc]
-        st.subheader("🌐 即時情感八角向量圖")
-        st.plotly_chart(plot_radar_chart(closest_time_data, EMOTIONS_NAMES), use_container_width=True)
-        st.subheader("📈 過去七天每小時情感分數 (表格)")
-        st.dataframe(hourly_data.reset_index().rename(columns={'index': '時間'}), use_container_width=True, height=300)
-        csv_data = hourly_data.to_csv(index=True).encode('utf-8')
-        st.download_button(
-            label="下載情感數據 (CSV)",
-            data=csv_data,
-            file_name=f"{selected_board}_sentiment_data.csv",
-            mime="text/csv",
-            help="下載當前看板的情感數據。"
-        )
-        if st.button("顯示已抓取的原始文章資料"):
-            st.dataframe(st.session_state['articles_df_dict'][selected_board], use_container_width=True, height=400)
-        st.info(f"目前已抓取並累積 {len(st.session_state['articles_df_dict'][selected_board])} 篇文章（含本次新抓取）")
-    else:
-        st.warning("⚠️ 沒有找到符合條件的文章，請嘗試其他看板或時間範圍。")
-        st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
-        st.session_state['articles_df_dict'][selected_board] = pd.DataFrame()
-    st.session_state['trigger_fetch'] = False
-elif (
-    ('hourly_data_dict' not in st.session_state or selected_board not in st.session_state['hourly_data_dict'] or st.session_state['hourly_data_dict'][selected_board].empty)
-    and ('articles_df_dict' not in st.session_state or selected_board not in st.session_state['articles_df_dict'] or st.session_state['articles_df_dict'][selected_board].empty)
-    and not st.session_state.get('trigger_fetch', False)
-):
-    st.info("👋 歡迎使用！請從左側選擇看板，然後點擊「抓取並分析最新文章」按鈕開始。")
-
-# --- 顯示結果 (當數據存在時) ---
-
-if 'hourly_data_dict' in st.session_state and selected_board in st.session_state['hourly_data_dict'] and not st.session_state['hourly_data_dict'][selected_board].empty:
-    hourly_data = st.session_state['hourly_data_dict'][selected_board]
-
+def display_analysis_results(selected_board, hourly_data, articles_df):
+    """顯示分析結果的統一函數"""
     min_time = hourly_data.index.min().to_pydatetime()
     max_time = hourly_data.index.max().to_pydatetime()
-
+    
     st.subheader(f"[{selected_board}] 七天情感趨勢分析")
     st.subheader("🕰️ 情感趨勢時間軸")
     slider_needed = min_time != max_time
@@ -240,8 +125,107 @@ if 'hourly_data_dict' in st.session_state and selected_board in st.session_state
     )
 
     if st.button("顯示已抓取的原始文章資料"):
-        st.dataframe(st.session_state['articles_df_dict'][selected_board], use_container_width=True, height=400)
-        st.info(f"目前已抓取並累積 {len(st.session_state['articles_df_dict'][selected_board])} 篇文章（含本次新抓取）")
+        st.dataframe(articles_df, use_container_width=True, height=400)
+        st.info(f"目前已抓取並累積 {len(articles_df)} 篇文章（含本次新抓取）")
+
+# 從 sentiment_analyzer 導入這些額外的映射，用於顯示
+from sentiment_analyzer import emotion_names_zh as EMOTION_NAMES_ZH
+from sentiment_analyzer import emotion_emojis as EMOTION_EMOJIS
+
+# --- SQLite 快取輔助函數 ---
+def save_board_to_sqlite(board, df, db_path='ptt_cache.db'):
+    conn = sqlite3.connect(db_path)
+    df.to_sql(f'ptt_{board}', conn, if_exists='replace', index=False)
+    conn.close()
+
+def load_board_from_sqlite(board, db_path='ptt_cache.db'):
+    conn = sqlite3.connect(db_path)
+    try:
+        df = pd.read_sql(f'SELECT * FROM ptt_{board}', conn, parse_dates=['timestamp'])
+    except Exception:
+        df = pd.DataFrame()
+    conn.close()
+    return df
+
+# --- 側邊欄控制項 ---
+with st.sidebar:
+    st.header("設定選項")
+    board_options = ['Gossiping', 'WomenTalk', 'Tech_Job', 'Boy-Girl', 'Stock', 'NBA']
+    selected_board = st.selectbox("選擇 PTT 看板", board_options, help="選擇你感興趣的 PTT 看板進行分析。")
+
+    today = datetime.date.today()
+    start_date = today - datetime.timedelta(days=6)
+    end_date = today
+    st.write(f"分析區間：{start_date} ~ {end_date}")
+
+    # 啟動時自動從 SQLite 載入 cache
+    if 'articles_df_dict' not in st.session_state:
+        st.session_state['articles_df_dict'] = {}
+        for board in board_options:
+            st.session_state['articles_df_dict'][board] = load_board_from_sqlite(board)
+    if 'hourly_data_dict' not in st.session_state:
+        st.session_state['hourly_data_dict'] = {}
+
+    # 依據目前 dropdown 選擇顯示 cache 數量
+    cache_count = 0
+    latest_time_str = "無"
+    if selected_board in st.session_state['articles_df_dict'] and isinstance(st.session_state['articles_df_dict'][selected_board], pd.DataFrame):
+        cache_count = len(st.session_state['articles_df_dict'][selected_board])
+        if cache_count > 0:
+            latest_time = st.session_state['articles_df_dict'][selected_board]['timestamp'].max()
+            latest_time_str = latest_time.strftime('%Y/%m/%d %H:%M')
+    st.write(f"目前 Cache 已有 {cache_count} 篇文章，最新抓取時間：{latest_time_str}")
+
+    if st.button("🔄 抓取並分析最新文章", help=f"點擊以獲取 {selected_board} 看板過去七天的文章，並重新進行情感分析。", use_container_width=True):
+        st.session_state['trigger_fetch'] = True
+        st.session_state['board_for_fetch'] = selected_board
+        st.session_state['start_date'] = start_date
+        st.session_state['end_date'] = end_date
+        st.success("已排程數據抓取與分析！請稍候...")
+
+# --- 主內容區域 ---
+
+if st.session_state.get('trigger_fetch', False):
+    # 不要清空 cache，保留用於增量抓取
+    st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
+
+    sentiment_model_placeholder = get_sentiment_model()
+
+    # 取得目前 cache 最新文章時間
+    last_time = None
+    if selected_board in st.session_state['articles_df_dict'] and not st.session_state['articles_df_dict'][selected_board].empty:
+        last_time = st.session_state['articles_df_dict'][selected_board]['timestamp'].max()
+    articles_df = get_ptt_articles_from_db(
+        board=st.session_state['board_for_fetch'],
+        last_time=last_time
+    )
+
+    if not articles_df.empty:
+        articles_df = analyze_sentiment_batch(articles_df, sentiment_model_placeholder)
+        hourly_data = aggregate_emotions_by_hour(articles_df)
+        st.session_state['hourly_data_dict'][selected_board] = hourly_data
+        st.session_state['articles_df_dict'][selected_board] = articles_df
+        save_board_to_sqlite(selected_board, articles_df)  # 寫入 SQLite
+        st.success("✅ 文章抓取與情感分析完成！")
+        display_analysis_results(selected_board, hourly_data, articles_df)
+    else:
+        st.warning("⚠️ 沒有找到符合條件的文章，請嘗試其他看板或時間範圍。")
+        st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
+        st.session_state['articles_df_dict'][selected_board] = pd.DataFrame()
+    st.session_state['trigger_fetch'] = False
+elif (
+    ('hourly_data_dict' not in st.session_state or selected_board not in st.session_state['hourly_data_dict'] or st.session_state['hourly_data_dict'][selected_board].empty)
+    and ('articles_df_dict' not in st.session_state or selected_board not in st.session_state['articles_df_dict'] or st.session_state['articles_df_dict'][selected_board].empty)
+    and not st.session_state.get('trigger_fetch', False)
+):
+    st.info("👋 歡迎使用！請從左側選擇看板，然後點擊「抓取並分析最新文章」按鈕開始。")
+
+# --- 顯示結果 (當數據存在時) ---
+
+if 'hourly_data_dict' in st.session_state and selected_board in st.session_state['hourly_data_dict'] and not st.session_state['hourly_data_dict'][selected_board].empty:
+    hourly_data = st.session_state['hourly_data_dict'][selected_board]
+    articles_df = st.session_state['articles_df_dict'][selected_board]
+    display_analysis_results(selected_board, hourly_data, articles_df)
 
 st.markdown("---")
 st.caption("數據來源：PTT。情感分析結果來自詞典與規則。")
