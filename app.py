@@ -320,12 +320,5 @@ elif (
 ):
     st.info("歡迎使用！請從左側選擇看板，然後點擊「抓取並分析最新文章」按鈕開始。")
 
-# --- 顯示結果 (當數據存在時) ---
-
-if 'hourly_data_dict' in st.session_state and selected_board in st.session_state['hourly_data_dict'] and not st.session_state['hourly_data_dict'][selected_board].empty:
-    hourly_data = st.session_state['hourly_data_dict'][selected_board]
-    articles_df = st.session_state['articles_df_dict'][selected_board]
-    display_analysis_results(selected_board, hourly_data, articles_df, 'exist')
-
 st.markdown("---")
 st.caption("數據來源：PTT。情感分析結果來自詞典與規則。")
