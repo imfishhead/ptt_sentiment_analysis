@@ -161,6 +161,54 @@ def load_board_from_sqlite(board, db_path='ptt_cache.db'):
         if conn:
             conn.close()
 
+# --- CSV 備用數據讀取函數 ---
+def load_csv_backup(board):
+    """從專案目錄讀取 CSV 備用數據"""
+    import os
+    import glob
+    
+    # 尋找符合看板名稱的 CSV 檔案
+    csv_patterns = [
+        f"{board.lower()}_*.csv",
+        f"{board}_*.csv", 
+        f"*{board.lower()}*.csv",
+        f"*{board}*.csv"
+    ]
+    
+    for pattern in csv_patterns:
+        csv_files = glob.glob(pattern)
+        if csv_files:
+            # 找到檔案，讀取第一個
+            csv_file = csv_files[0]
+            try:
+                st.info(f"📁 讀取備用 CSV 檔案：{csv_file}")
+                df = pd.read_csv(csv_file, parse_dates=['timestamp'])
+                
+                # 檢查必要的欄位
+                required_columns = ['timestamp', 'content', 'title', 'author', 'board']
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                
+                if missing_columns:
+                    st.warning(f"CSV 檔案缺少必要欄位：{missing_columns}")
+                    continue
+                
+                # 只保留近七天的數據
+                seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+                df = df[df['timestamp'] >= seven_days_ago]
+                
+                if not df.empty:
+                    st.success(f"✅ 成功讀取 {len(df)} 篇文章（來自 CSV 備用數據）")
+                    return df
+                else:
+                    st.warning("CSV 檔案中沒有近七天的數據")
+                    
+            except Exception as e:
+                st.error(f"讀取 CSV 檔案時發生錯誤：{str(e)}")
+                continue
+    
+    st.warning("❌ 沒有找到可用的 CSV 備用數據檔案")
+    return pd.DataFrame()
+
 # --- 側邊欄控制項 ---
 with st.sidebar:
     st.header("設定選項")
@@ -223,6 +271,20 @@ if st.session_state.get('trigger_fetch', False):
     )
     
     st.info(f"爬蟲函數執行完成，回傳 DataFrame 大小：{len(articles_df)} 行")
+
+    # 如果爬取失敗，嘗試讀取 CSV 備用數據
+    if articles_df.empty:
+        st.warning("⚠️ 爬取失敗，嘗試讀取 CSV 備用數據...")
+        articles_df = load_csv_backup(selected_board)
+        
+        if not articles_df.empty:
+            st.success("✅ 成功使用 CSV 備用數據！")
+        else:
+            st.error("❌ 爬取失敗且無可用備用數據，請檢查網路連線或提供 CSV 檔案")
+            st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
+            st.session_state['articles_df_dict'][selected_board] = pd.DataFrame()
+            st.session_state['trigger_fetch'] = False
+            st.stop()
 
     if not articles_df.empty:
         st.info("開始情感分析...")

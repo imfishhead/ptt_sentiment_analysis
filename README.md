@@ -25,6 +25,7 @@
 - **自動去重**：基於時間戳、標題、作者進行去重處理
 - **數據匯出**：支援 CSV 格式下載情感分析結果
 - **記憶體優化**：延遲載入，避免記憶體溢出
+- **CSV 備用數據**：爬取失敗時自動讀取專案目錄內的 CSV 檔案
 
 ### 🎨 使用者介面
 - **響應式設計**：支援各種螢幕尺寸
@@ -61,6 +62,27 @@ streamlit run app.py
 3. **開始分析**：點擊「抓取並分析最新文章」按鈕
 4. **查看結果**：等待分析完成，查看情感趨勢圖表和數據
 
+### CSV 備用數據
+當爬取失敗時，系統會自動尋找專案目錄內的 CSV 檔案作為備用數據：
+
+**檔案命名規則**：
+- `{看板名稱}_*.csv`（例如：`gossiping_*.csv`）
+- `{看板名稱}*.csv`（例如：`womentalk*.csv`）
+- `*{看板名稱}*.csv`（例如：`*gossiping*.csv`）
+
+**CSV 檔案格式**：
+```csv
+timestamp,content,title,author,board
+2024-01-15 10:30:00,"文章內容","文章標題","作者","看板名稱"
+```
+
+**必要欄位**：
+- `timestamp`：文章時間戳
+- `content`：文章內容
+- `title`：文章標題
+- `author`：作者
+- `board`：看板名稱
+
 ### 功能說明
 
 #### 情感趨勢時間軸
@@ -88,6 +110,8 @@ ptt_sentiment_analysis/
 ├── config.py             # 配置檔案
 ├── requirements.txt      # Python 依賴
 ├── ptt_cache.db         # SQLite 快取資料庫
+├── gossiping_sample.csv # Gossiping 看板範例數據
+├── womentalk_sample.csv # WomenTalk 看板範例數據
 └── README.md            # 專案說明文件
 ```
 
