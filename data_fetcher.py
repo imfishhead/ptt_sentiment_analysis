@@ -38,31 +38,21 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0'
+        'Cache-Control': 'max-age=0',
+        'Referer': 'https://www.google.com/'
     })
     
-    # 設定 cookies
-    cookies = http.cookiejar.CookieJar()
-    cookie = http.cookiejar.Cookie(
-        version=0, name='over18', value='1',
-        port=None, port_specified=False,
-        domain='www.ptt.cc', domain_specified=False,
-        domain_initial_dot=False,
-        path='/', path_specified=True,
-        secure=False, expires=None,
-        discard=True, comment=None,
-        comment_url=None, rest={'HttpOnly': None},
-        rfc2109=False
-    )
-    cookies.set_cookie(cookie)
-    session.cookies = cookies
+    # 設定更完整的 cookies
+    session.cookies.set('over18', '1', domain='www.ptt.cc', path='/')
+    session.cookies.set('_ga', 'GA1.1.1234567890.1234567890', domain='.ptt.cc', path='/')
+    session.cookies.set('_ga_1234567890', 'GS1.1.1234567890.1.1.1234567890.0.0.0', domain='.ptt.cc', path='/')
     
     days_to_scrape = 7
     today = datetime.date.today()
     start = today - datetime.timedelta(days=days_to_scrape-1)
     max_pages = 20
-    request_delay = 2.0  # 增加延遲時間
-    page_delay = 1.0     # 增加頁面間延遲
+    request_delay = 3.0  # 增加延遲時間
+    page_delay = 2.0     # 增加頁面間延遲
     current_count = 0
     page = 1
     stop_crawling = False
@@ -70,12 +60,56 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     info_msg.info(f"開始爬取，目標日期範圍：{start} ~ {today}")
     info_msg.info(f"目標 URL：{url}")
     
-    # 首先測試連線
+    # 首先訪問 Google，然後再訪問 PTT（模擬真實瀏覽行為）
     try:
+        info_msg.info("模擬真實瀏覽行為：先訪問 Google...")
+        session.get("https://www.google.com", timeout=10)
+        time.sleep(2)
+        
         info_msg.info("測試 PTT 連線...")
         test_res = session.get("https://www.ptt.cc/bbs/index.html", timeout=15)
         info_msg.info(f"PTT 主頁連線測試：狀態碼 {test_res.status_code}")
-        if test_res.status_code != 200:
+        
+        if test_res.status_code == 403:
+            error_msg.error("PTT 主頁連線被阻擋（403 Forbidden）")
+            info_msg.info("嘗試使用不同的 User-Agent...")
+            
+            # 嘗試不同的 User-Agent
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+            
+            for i, ua in enumerate(user_agents):
+                info_msg.info(f"嘗試 User-Agent {i+1}: {ua[:50]}...")
+                session.headers.update({'User-Agent': ua})
+                time.sleep(3)
+                
+                try:
+                    test_res = session.get("https://www.ptt.cc/bbs/index.html", timeout=15)
+                    if test_res.status_code == 200:
+                        info_msg.info(f"User-Agent {i+1} 成功！")
+                        break
+                    else:
+                        info_msg.info(f"User-Agent {i+1} 失敗，狀態碼：{test_res.status_code}")
+                except Exception as e:
+                    info_msg.info(f"User-Agent {i+1} 連線錯誤：{str(e)}")
+            
+            # 如果所有 User-Agent 都失敗，嘗試直接訪問目標看板
+            if test_res.status_code != 200:
+                info_msg.info("所有 User-Agent 都失敗，嘗試直接訪問目標看板...")
+                try:
+                    direct_res = session.get(url, timeout=15)
+                    if direct_res.status_code == 200:
+                        info_msg.info("直接訪問目標看板成功！")
+                    else:
+                        error_msg.error(f"直接訪問目標看板也失敗，狀態碼：{direct_res.status_code}")
+                        return pd.DataFrame()
+                except Exception as e:
+                    error_msg.error(f"直接訪問目標看板連線錯誤：{str(e)}")
+                    return pd.DataFrame()
+        elif test_res.status_code != 200:
             error_msg.error(f"PTT 主頁連線失敗，狀態碼：{test_res.status_code}")
             return pd.DataFrame()
     except Exception as e:
@@ -91,7 +125,9 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
             
             if res.status_code == 403:
                 error_msg.error("PTT 拒絕連線（403 Forbidden），可能是反爬蟲機制")
-                break
+                info_msg.info("等待 10 秒後重試...")
+                time.sleep(10)
+                continue
             elif res.status_code == 404:
                 error_msg.error(f"看板 {board} 不存在（404 Not Found）")
                 break
