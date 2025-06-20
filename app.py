@@ -178,7 +178,7 @@ def load_board_from_sqlite(board, db_path='ptt_cache.db'):
             conn.close()
 
 # --- CSV 備用數據讀取函數 ---
-def load_csv_backup(board):
+def load_csv_backup(board, info_container=None):
     """從專案目錄讀取 CSV 備用數據"""
     import os
     import glob
@@ -197,7 +197,10 @@ def load_csv_backup(board):
             # 找到檔案，讀取第一個
             csv_file = csv_files[0]
             try:
-                st.info(f"📁 讀取備用 CSV 檔案：{csv_file}")
+                if info_container:
+                    info_container.info(f"📁 讀取備用 CSV 檔案：{csv_file}")
+                else:
+                    st.info(f"📁 讀取備用 CSV 檔案：{csv_file}")
                 df = pd.read_csv(csv_file, parse_dates=['timestamp'])
                 
                 # 檢查必要的欄位
@@ -261,6 +264,12 @@ with st.sidebar:
 # --- 主內容區域 ---
 
 if st.session_state.get('trigger_fetch', False):
+    # 創建訊息容器來管理所有 info 訊息
+    fetch_info_container = st.empty()
+    cache_info_container = st.empty()
+    crawler_info_container = st.empty()
+    result_info_container = st.empty()
+    
     # 不要清空 cache，保留用於增量抓取
     st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
 
@@ -274,21 +283,21 @@ if st.session_state.get('trigger_fetch', False):
     last_time = None
     if selected_board in st.session_state['articles_df_dict'] and not st.session_state['articles_df_dict'][selected_board].empty:
         last_time = st.session_state['articles_df_dict'][selected_board]['timestamp'].max()
-        st.info(f"現有 cache 最新文章時間：{last_time}")
+        cache_info_container.info(f"現有 cache 最新文章時間：{last_time}")
     
-    st.info(f"開始呼叫爬蟲函數：get_ptt_articles_from_db({st.session_state['board_for_fetch']}, {last_time})")
+    crawler_info_container.info(f"開始呼叫爬蟲函數：get_ptt_articles_from_db({st.session_state['board_for_fetch']}, {last_time})")
     
     articles_df = get_ptt_articles_from_db(
         board=st.session_state['board_for_fetch'],
         last_time=last_time
     )
     
-    st.info(f"爬蟲函數執行完成，回傳 DataFrame 大小：{len(articles_df)} 行")
+    result_info_container.info(f"爬蟲函數執行完成，回傳 DataFrame 大小：{len(articles_df)} 行")
 
     # 如果爬取失敗，嘗試讀取 CSV 備用數據
     if articles_df.empty:
         st.warning("⚠️ 爬取失敗，嘗試讀取 CSV 備用數據...")
-        articles_df = load_csv_backup(selected_board)
+        articles_df = load_csv_backup(selected_board, result_info_container)
         
         if not articles_df.empty:
             st.success("✅ 成功使用 CSV 備用數據！")
@@ -300,12 +309,23 @@ if st.session_state.get('trigger_fetch', False):
             st.stop()
 
     if not articles_df.empty:
-        st.info("開始情感分析...")
+        # 創建訊息容器
+        analysis_info_container = st.empty()
+        analysis_info_container.info("開始情感分析...")
+        
         articles_df = analyze_sentiment_batch(articles_df, sentiment_model_placeholder)
         hourly_data = aggregate_emotions_by_hour(articles_df)
         st.session_state['hourly_data_dict'][selected_board] = hourly_data
         st.session_state['articles_df_dict'][selected_board] = articles_df
         save_board_to_sqlite(selected_board, articles_df)  # 寫入 SQLite
+        
+        # 清空所有 info 訊息
+        fetch_info_container.empty()
+        cache_info_container.empty()
+        crawler_info_container.empty()
+        result_info_container.empty()
+        analysis_info_container.empty()
+        
         st.success("✅ 文章抓取與情感分析完成！")
         display_analysis_results(selected_board, hourly_data, articles_df,'analyze')
     else:
@@ -319,6 +339,12 @@ elif (
     and not st.session_state.get('trigger_fetch', False)
 ):
     st.info("歡迎使用！請從左側選擇看板，然後點擊「抓取並分析最新文章」按鈕開始。")
+else:
+    # 顯示現有數據（當沒有觸發新的分析時）
+    if 'hourly_data_dict' in st.session_state and selected_board in st.session_state['hourly_data_dict'] and not st.session_state['hourly_data_dict'][selected_board].empty:
+        hourly_data = st.session_state['hourly_data_dict'][selected_board]
+        articles_df = st.session_state['articles_df_dict'][selected_board]
+        display_analysis_results(selected_board, hourly_data, articles_df, 'exist')
 
 st.markdown("---")
 st.caption("數據來源：PTT。情感分析結果來自詞典與規則。")
