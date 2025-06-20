@@ -163,7 +163,7 @@ def analyze_emotion_types(text: str, emotion_lexicon: dict, negation_words: list
     # 假設一篇短文最多一種情感詞可能出現 5 次，且程度副詞加乘 2x。
     # 因此最大理想分數可能為 1 * 5 * 2 = 10。
     # 這裡設定一個經驗值 MAX_EMOTION_SCORE_EXPECTED 來歸一化。
-    MAX_EMOTION_SCORE_EXPECTED = 5.0 # 這個值可以根據你的文章長度、情感詞密度來調整
+    MAX_EMOTION_SCORE_EXPECTED = 1.0 # 降低這個值以產生更大的數值範圍，讓向量圖更明顯
 
     for emo_type in overall_emotion_scores:
         overall_emotion_scores[emo_type] = np.clip(overall_emotion_scores[emo_type], 0, MAX_EMOTION_SCORE_EXPECTED) / MAX_EMOTION_SCORE_EXPECTED

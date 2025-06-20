@@ -53,6 +53,21 @@ def plot_radar_chart(data_row: pd.Series, emotions: list) -> go.Figure:
     categories = [f"{EMOTION_NAMES_ZH.get(emo, emo)} {EMOTION_EMOJIS.get(emo, '')}" for emo in emotions]
     values = [data_row.get(emotion, 0) for emotion in emotions]
     
+    # 動態計算軸線範圍
+    max_value = max(values) if values else 0.1
+    if max_value <= 0.1:
+        # 如果最大值很小，設定一個合適的範圍
+        axis_max = 0.1
+        tick_vals = [0, 0.02, 0.04, 0.06, 0.08, 0.1]
+    elif max_value <= 0.5:
+        # 中等範圍
+        axis_max = 0.5
+        tick_vals = [0, 0.1, 0.2, 0.3, 0.4, 0.5]
+    else:
+        # 大範圍
+        axis_max = 1.0
+        tick_vals = [0, 0.25, 0.5, 0.75, 1.0]
+    
     fig = go.Figure()
     fig.add_trace(go.Scatterpolar(
         r=values,
@@ -66,8 +81,9 @@ def plot_radar_chart(data_row: pd.Series, emotions: list) -> go.Figure:
         polar=dict(
             radialaxis=dict(
                 visible=True,
-                range=[0, 1],
-                tickvals=[0, 0.25, 0.5, 0.75, 1],
+                range=[0, axis_max],
+                tickvals=tick_vals,
+                ticktext=[f"{val:.3f}" for val in tick_vals],  # 顯示三位小數
                 gridcolor='lightgray',
                 linecolor='gray'
             ),
@@ -81,7 +97,7 @@ def plot_radar_chart(data_row: pd.Series, emotions: list) -> go.Figure:
     )
     return fig
 
-def display_analysis_results(selected_board, hourly_data, articles_df):
+def display_analysis_results(selected_board, hourly_data, articles_df, mode='exist'):
     """顯示分析結果的統一函數"""
     min_time = hourly_data.index.min().to_pydatetime()
     max_time = hourly_data.index.max().to_pydatetime()
@@ -98,7 +114,7 @@ def display_analysis_results(selected_board, hourly_data, articles_df):
             step=datetime.timedelta(hours=1),
             format="YYYY/MM/DD HH:00",
             help="拖動滑桿以查看不同時間點的文章情感分佈。",
-            key="sentiment_time_slider"
+            key=f"sentiment_time_slider_{mode}"
         )
     else:
         selected_time = min_time
@@ -291,7 +307,7 @@ if st.session_state.get('trigger_fetch', False):
         st.session_state['articles_df_dict'][selected_board] = articles_df
         save_board_to_sqlite(selected_board, articles_df)  # 寫入 SQLite
         st.success("✅ 文章抓取與情感分析完成！")
-        display_analysis_results(selected_board, hourly_data, articles_df)
+        display_analysis_results(selected_board, hourly_data, articles_df,'analyze')
     else:
         st.warning("⚠️ 沒有找到符合條件的文章，請嘗試其他看板或時間範圍。")
         st.session_state['hourly_data_dict'][selected_board] = pd.DataFrame()
@@ -309,7 +325,7 @@ elif (
 if 'hourly_data_dict' in st.session_state and selected_board in st.session_state['hourly_data_dict'] and not st.session_state['hourly_data_dict'][selected_board].empty:
     hourly_data = st.session_state['hourly_data_dict'][selected_board]
     articles_df = st.session_state['articles_df_dict'][selected_board]
-    display_analysis_results(selected_board, hourly_data, articles_df)
+    display_analysis_results(selected_board, hourly_data, articles_df, 'exist')
 
 st.markdown("---")
 st.caption("數據來源：PTT。情感分析結果來自詞典與規則。")

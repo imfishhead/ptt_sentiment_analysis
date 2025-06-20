@@ -47,7 +47,7 @@ def get_ptt_articles_from_db(board: str, last_time=None) -> pd.DataFrame:
     session.cookies.set('_ga', 'GA1.1.1234567890.1234567890', domain='.ptt.cc', path='/')
     session.cookies.set('_ga_1234567890', 'GS1.1.1234567890.1.1.1234567890.0.0.0', domain='.ptt.cc', path='/')
     
-    days_to_scrape = 7
+    days_to_scrape = 2
     today = datetime.date.today()
     start = today - datetime.timedelta(days=days_to_scrape-1)
     max_pages = 20
