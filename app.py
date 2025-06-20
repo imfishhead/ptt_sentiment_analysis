@@ -192,15 +192,12 @@ def load_csv_backup(board):
                     st.warning(f"CSV 檔案缺少必要欄位：{missing_columns}")
                     continue
                 
-                # 只保留近七天的數據
-                seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
-                df = df[df['timestamp'] >= seven_days_ago]
-                
+                # 取消時間篩選，直接讀取所有數據
                 if not df.empty:
                     st.success(f"✅ 成功讀取 {len(df)} 篇文章（來自 CSV 備用數據）")
                     return df
                 else:
-                    st.warning("CSV 檔案中沒有近七天的數據")
+                    st.warning("CSV 檔案是空的")
                     
             except Exception as e:
                 st.error(f"讀取 CSV 檔案時發生錯誤：{str(e)}")
